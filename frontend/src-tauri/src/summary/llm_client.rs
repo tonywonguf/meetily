@@ -46,6 +46,62 @@ pub struct ChatRequest {
 }
 
 /// Build OpenAI-compat JSON body.
+pub(crate) fn build_chatgpt_responses_body(
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "model": model_name,
+        "input": [
+            {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]}
+        ],
+        "reasoning": {"effort": "none"},
+        "max_output_tokens": 4096,
+        "store": false,
+        "stream": false
+    })
+}
+
+pub(crate) fn parse_chatgpt_responses_completion(
+    response: serde_json::Value,
+) -> Result<LlmCompletion, String> {
+    let mut text = String::new();
+    let mut reasoning_stripped = false;
+    for item in response
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("OpenAI Responses API returned no output")?
+    {
+        if item.get("type").and_then(serde_json::Value::as_str) == Some("reasoning") {
+            reasoning_stripped = true;
+        }
+        for content in item
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if content.get("type").and_then(serde_json::Value::as_str) == Some("output_text") {
+                if let Some(value) = content.get("text").and_then(serde_json::Value::as_str) {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(value);
+                }
+            }
+        }
+    }
+    if text.trim().is_empty() {
+        return Err("OpenAI Responses API returned no text content".to_string());
+    }
+    Ok(LlmCompletion {
+        content: text.trim().to_string(),
+        reasoning_stripped,
+    })
+}
+
 pub fn build_openai_compat_chat_body(
     provider: &LLMProvider,
     model_name: &str,
@@ -214,6 +270,7 @@ pub(crate) fn ollama_rejects_reasoning_effort(status: reqwest::StatusCode, body:
 #[derive(Debug, Clone, PartialEq)]
 pub enum LLMProvider {
     OpenAI,
+    OpenAIChatGPT,
     Claude,
     Groq,
     Ollama,
@@ -227,6 +284,7 @@ impl LLMProvider {
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_lowercase().as_str() {
             "openai" => Ok(Self::OpenAI),
+            "openai-chatgpt" => Ok(Self::OpenAIChatGPT),
             "claude" => Ok(Self::Claude),
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
@@ -303,6 +361,10 @@ pub(crate) async fn generate_summary(
             "https://api.openai.com/v1/chat/completions".to_string(),
             header::HeaderMap::new(),
         ),
+        LLMProvider::OpenAIChatGPT => (
+            "https://api.openai.com/v1/responses".to_string(),
+            header::HeaderMap::new(),
+        ),
         LLMProvider::Groq => (
             "https://api.groq.com/openai/v1/chat/completions".to_string(),
             header::HeaderMap::new(),
@@ -367,7 +429,9 @@ pub(crate) async fn generate_summary(
     );
 
     // Build request body based on provider
-    let request_body = if provider != &LLMProvider::Claude {
+    let request_body = if provider == &LLMProvider::OpenAIChatGPT {
+        build_chatgpt_responses_body(model_name, system_prompt, user_prompt)
+    } else if provider != &LLMProvider::Claude {
         build_openai_compat_chat_body(
             provider,
             model_name,
@@ -485,7 +549,12 @@ pub(crate) async fn generate_summary(
     }
 
     // Parse response based on provider
-    if provider == &LLMProvider::Claude {
+    if provider == &LLMProvider::OpenAIChatGPT {
+        let response = await_or_cancel(response.json::<serde_json::Value>(), cancellation_token)
+            .await?
+            .map_err(|e| format!("Failed to parse OpenAI Responses API response: {}", e))?;
+        parse_chatgpt_responses_completion(response)
+    } else if provider == &LLMProvider::Claude {
         let chat_response = await_or_cancel(
             response.json::<ClaudeChatResponse>(),
             cancellation_token,
@@ -562,6 +631,27 @@ mod tests {
             .map(|position| position + 4)
             .expect("request should contain complete headers");
         serde_json::from_slice(&request[headers_end..]).expect("request body should be valid JSON")
+    }
+
+    #[test]
+    fn chatgpt_subscription_uses_luna_responses_api_shape() {
+        let body = build_chatgpt_responses_body("gpt-6-luna", "System", "Transcript");
+        assert_eq!(body["model"], "gpt-6-luna");
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["max_output_tokens"], 4096);
+        assert_eq!(body["store"], false);
+        assert_eq!(body["input"][0]["role"], "system");
+        assert_eq!(body["input"][0]["content"][0]["text"], "System");
+        assert_eq!(body["input"][1]["content"][0]["text"], "Transcript");
+
+        let completion = parse_chatgpt_responses_completion(json!({
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": "Meeting summary."}]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(completion.content, "Meeting summary.");
     }
 
     #[test]
@@ -916,6 +1006,7 @@ mod tests {
 fn provider_name(provider: &LLMProvider) -> &str {
     match provider {
         LLMProvider::OpenAI => "OpenAI",
+        LLMProvider::OpenAIChatGPT => "OpenAI ChatGPT subscription",
         LLMProvider::Claude => "Claude",
         LLMProvider::Groq => "Groq",
         LLMProvider::Ollama => "Ollama",

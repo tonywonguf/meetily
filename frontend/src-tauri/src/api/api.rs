@@ -546,9 +546,9 @@ pub async fn api_save_model_config<R: Runtime>(
         return Err(e.to_string());
     }
 
-    // Skip API key saving for custom-openai provider (it uses customOpenAIConfig JSON instead)
+    // ChatGPT OAuth credentials live in the OS credential store; custom OpenAI uses its JSON config.
     if let Some(key) = api_key {
-        if !key.is_empty() && provider != "custom-openai" {
+        if !key.is_empty() && provider != "custom-openai" && provider != "openai-chatgpt" {
             log_info!("🔑 API key provided, saving...");
             if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
                 log_error!("❌ Failed to save API key: {}", e);

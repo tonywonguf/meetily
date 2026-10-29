@@ -81,11 +81,11 @@ impl SettingsRepository {
 
         let api_key_column = match provider {
             "openai" => "openaiApiKey",
+            "openai-chatgpt" | "builtin-ai" => return Ok(()),
             "claude" => "anthropicApiKey",
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(()), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -119,11 +119,11 @@ impl SettingsRepository {
 
         let api_key_column = match provider {
             "openai" => "openaiApiKey",
+            "openai-chatgpt" | "builtin-ai" => return Ok(None), // No API key needed
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(None), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -137,6 +137,32 @@ impl SettingsRepository {
         );
         let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
         Ok(api_key)
+    }
+
+    pub async fn get_openai_chatgpt_device_id(
+        pool: &SqlitePool,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let device_id = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT openaiChatGPTDeviceId FROM settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        Ok(device_id.flatten())
+    }
+
+    pub async fn save_openai_chatgpt_device_id(
+        pool: &SqlitePool,
+        device_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"INSERT INTO settings (id, provider, model, whisperModel, openaiChatGPTDeviceId)
+               VALUES ('1', 'openai-chatgpt', 'gpt-6-luna', 'large-v3', $1)
+               ON CONFLICT(id) DO UPDATE SET openaiChatGPTDeviceId = excluded.openaiChatGPTDeviceId"#,
+        )
+        .bind(device_id)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn get_transcript_config(

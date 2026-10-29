@@ -359,9 +359,16 @@ impl SummaryService {
             }
         };
 
-        // Validate and setup api_key, Flexible for Ollama, BuiltInAI, and CustomOpenAI
-        let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
-            // These providers don't require API keys from the standard database column
+        // Resolve the ChatGPT OAuth access token without exposing it to the frontend.
+        let api_key = if provider == LLMProvider::OpenAIChatGPT {
+            match crate::openai::chatgpt::get_access_token().await {
+                Ok(token) => token,
+                Err(error) => {
+                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &error).await;
+                    return;
+                }
+            }
+        } else if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
             String::new()
         } else {
             match SettingsRepository::get_api_key(&pool, &model_provider).await {

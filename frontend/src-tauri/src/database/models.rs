@@ -96,6 +96,8 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    #[sqlx(rename = "openaiChatGPTDeviceId")]
+    pub openai_chatgpt_device_id: Option<String>,
 }
 
 impl Setting {

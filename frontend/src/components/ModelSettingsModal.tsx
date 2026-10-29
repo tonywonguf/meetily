@@ -31,7 +31,7 @@ import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openai-chatgpt' | 'openrouter' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -75,6 +75,8 @@ interface GroqModel {
 }
 
 // Fallback models for when API fetch fails or no API key provided
+const CHATGPT_SUBSCRIPTION_MODELS = ['gpt-6-luna'];
+
 const OPENAI_FALLBACK_MODELS = [
   'gpt-4o',
   'gpt-4o-mini',
@@ -154,6 +156,8 @@ export function ModelSettingsModal({
   const [customTopP, setCustomTopP] = useState<string>(modelConfig.topP?.toString() || '');
   const [isCustomOpenAIAdvancedOpen, setIsCustomOpenAIAdvancedOpen] = useState<boolean>(false);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [isChatGPTConnected, setIsChatGPTConnected] = useState(false);
+  const [isConnectingChatGPT, setIsConnectingChatGPT] = useState(false);
 
   // Combobox state
   const [modelComboboxOpen, setModelComboboxOpen] = useState<boolean>(false);
@@ -228,6 +232,7 @@ export function ModelSettingsModal({
     claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
     groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
+    'openai-chatgpt': CHATGPT_SUBSCRIPTION_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
@@ -252,6 +257,7 @@ export function ModelSettingsModal({
   const isDoneDisabled =
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
+    (modelConfig.provider === 'openai-chatgpt' && !isChatGPTConnected) ||
     isCustomOpenAIInvalid;
 
   useEffect(() => {
@@ -312,6 +318,35 @@ export function ModelSettingsModal({
 
     fetchModelConfig();
   }, [skipInitialFetch]);
+
+  useEffect(() => {
+    invoke<boolean>('api_openai_chatgpt_connected')
+      .then(setIsChatGPTConnected)
+      .catch((err) => console.error('Failed to check ChatGPT sign-in:', err));
+  }, []);
+
+  const connectChatGPT = async () => {
+    setIsConnectingChatGPT(true);
+    try {
+      await invoke('api_connect_openai_chatgpt');
+      setIsChatGPTConnected(true);
+      toast.success('ChatGPT connected');
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'ChatGPT sign-in failed');
+    } finally {
+      setIsConnectingChatGPT(false);
+    }
+  };
+
+  const disconnectChatGPT = async () => {
+    try {
+      await invoke('api_disconnect_openai_chatgpt');
+      setIsChatGPTConnected(false);
+      toast.success('ChatGPT sign-in removed from this device');
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Could not disconnect ChatGPT');
+    }
+  };
 
   // Fetch auto-generate setting on mount
   useEffect(() => {
@@ -636,7 +671,9 @@ export function ModelSettingsModal({
 
     const updatedConfig = {
       ...modelConfig,
-      apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
+      apiKey: modelConfig.provider === 'openai-chatgpt'
+        ? null
+        : (typeof apiKey === 'string' ? apiKey.trim() || null : null),
       ollamaEndpoint: modelConfig.provider === 'ollama'
         ? (ollamaEndpoint.trim() || null)
         : (modelConfig.ollamaEndpoint || null),
@@ -661,7 +698,7 @@ export function ModelSettingsModal({
     }
 
     // Update provider-specific key in context
-    if (updateProviderApiKey && updatedConfig.apiKey && updatedConfig.provider !== 'custom-openai') {
+    if (updateProviderApiKey && updatedConfig.apiKey && updatedConfig.provider !== 'custom-openai' && updatedConfig.provider !== 'openai-chatgpt') {
       updateProviderApiKey(updatedConfig.provider, updatedConfig.apiKey);
     }
 
@@ -879,7 +916,8 @@ export function ModelSettingsModal({
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="openai">OpenAI (API key)</SelectItem>
+                <SelectItem value="openai-chatgpt">ChatGPT subscription</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
             </Select>
@@ -1067,6 +1105,31 @@ export function ModelSettingsModal({
                 </>
               )}
             </Button>
+          </div>
+        )}
+
+        {modelConfig.provider === 'openai-chatgpt' && (
+          <div className="space-y-3 border-t pt-4">
+            <div>
+              <Label>ChatGPT subscription</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sign in to use GPT-6 Luna. Meetily stores OAuth credentials in your system credential store, not in its database.
+              </p>
+            </div>
+            {isChatGPTConnected ? (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-green-600">Connected</span>
+                <Button type="button" variant="outline" size="sm" onClick={disconnectChatGPT}>
+                  Disconnect
+                </Button>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" onClick={connectChatGPT} disabled={isConnectingChatGPT}>
+                {isConnectingChatGPT ? (
+                  <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Waiting for sign-in...</>
+                ) : 'Connect ChatGPT'}
+              </Button>
+            )}
           </div>
         )}
 
