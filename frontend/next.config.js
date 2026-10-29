@@ -27,6 +27,9 @@ const nextConfig = {
       // Keep ProseMirror single-instanced for BlockNote/Tiptap.
       config.resolve.alias = {
         ...config.resolve.alias,
+        '@tauri-apps/api/core$': path.resolve(__dirname, 'src/lib/tauriBridge.ts'),
+        '@tauri-apps/api/event$': path.resolve(__dirname, 'src/lib/tauriEvents.ts'),
+        '@tauri-apps/api/path$': path.resolve(__dirname, 'src/lib/tauriPath.ts'),
         '@blocknote/core$': require.resolve('@blocknote/core'),
         '@blocknote/react$': require.resolve('@blocknote/react'),
         '@blocknote/shadcn$': require.resolve('@blocknote/shadcn'),

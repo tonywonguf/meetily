@@ -3,6 +3,7 @@
 import './globals.css'
 import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
+import RemoteInvokeBridge from '@/components/RemoteInvokeBridge'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
@@ -233,6 +234,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
+        <RemoteInvokeBridge />
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>

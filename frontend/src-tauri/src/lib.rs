@@ -48,6 +48,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
+mod remote_ui;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
@@ -474,6 +475,7 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(remote_ui::RemoteBridgeState::default())
         .setup(|_app| {
             #[cfg(target_os = "windows")]
             match _app.path().resolve(
@@ -595,6 +597,9 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            let remote_bridge = _app.state::<remote_ui::RemoteBridgeState>().inner().clone();
+            remote_ui::start(_app.handle().clone(), remote_bridge);
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -610,6 +615,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            remote_ui::remote_ui_reply,
             start_recording,
             stop_recording,
             is_recording,

@@ -1,0 +1,1 @@
+export { appDataDir } from './tauriBridge';
